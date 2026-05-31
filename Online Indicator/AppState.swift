@@ -16,9 +16,14 @@ class AppState {
         case noNetwork
     }
 
-    var statusUpdateHandler: ((ConnectionStatus) -> Void)?
+    struct ConnectionSnapshot {
+        let overallStatus: ConnectionStatus
+        let siteStatuses: [ConnectionStatus]
+    }
 
-    var checkNowResultHandler: ((ConnectionStatus) -> Void)?
+    var statusUpdateHandler: ((ConnectionSnapshot) -> Void)?
+
+    var checkNowResultHandler: ((ConnectionSnapshot) -> Void)?
 
     var refreshInterval: TimeInterval {
         let saved = UserDefaults.standard.double(forKey: "refreshInterval")
@@ -88,19 +93,25 @@ class AppState {
     // MARK: - Core Logic
 
     private func checkConnection(onDemand: Bool = false) {
+        let targetCount = ConnectivityChecker.monitoringURLStrings.count
 
         if !networkMonitor.isConnected {
-            let status = ConnectionStatus.noNetwork
-            statusUpdateHandler?(status)
-            if onDemand { checkNowResultHandler?(status) }
+            let snapshot = ConnectionSnapshot(
+                overallStatus: .noNetwork,
+                siteStatuses: Array(repeating: .noNetwork, count: targetCount)
+            )
+            statusUpdateHandler?(snapshot)
+            if onDemand { checkNowResultHandler?(snapshot) }
             return
         }
 
-        connectivityChecker.checkOutboundConnection { [weak self] reachable in
+        connectivityChecker.checkOutboundConnections { [weak self] reachableSites in
             DispatchQueue.main.async {
-                let status: ConnectionStatus = reachable ? .connected : .blocked
-                self?.statusUpdateHandler?(status)
-                if onDemand { self?.checkNowResultHandler?(status) }
+                let siteStatuses = reachableSites.map { $0 ? ConnectionStatus.connected : .blocked }
+                let overallStatus: ConnectionStatus = siteStatuses.allSatisfy { $0 == .connected } ? .connected : .blocked
+                let snapshot = ConnectionSnapshot(overallStatus: overallStatus, siteStatuses: siteStatuses)
+                self?.statusUpdateHandler?(snapshot)
+                if onDemand { self?.checkNowResultHandler?(snapshot) }
             }
         }
     }

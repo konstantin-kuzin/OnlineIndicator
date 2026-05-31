@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private var mainMenu:             NSMenu?
 
     private var currentStatus: AppState.ConnectionStatus = .noNetwork
+    private var currentSiteStatuses: [AppState.ConnectionStatus] = [.noNetwork]
     private var lastIPv4: String?
     private var lastIPv6: String?
 
@@ -104,12 +105,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             }
         }
 
-        AppState.shared.statusUpdateHandler = { [weak self] status in
+        AppState.shared.statusUpdateHandler = { [weak self] snapshot in
             guard let self else { return }
 
             let previous = self.currentStatus
+            let previousSites = self.currentSiteStatuses
+            let status = snapshot.overallStatus
+
             self.currentStatus = status
-            self.updateIcon(for: status)
+            self.currentSiteStatuses = snapshot.siteStatuses
+            self.updateIcon(for: status, siteStatuses: snapshot.siteStatuses)
 
             self.receivedFirstStatus = true
 
@@ -137,13 +142,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
                 self.suppressNextStatusPopover = false
                 return
             }
-            guard status != previous else { return }
-            self.popoverManager.showConnectionStatus(status)
+            guard status != previous || snapshot.siteStatuses != previousSites else { return }
+            self.popoverManager.showConnectionStatus(status, siteStatuses: snapshot.siteStatuses)
         }
 
-        AppState.shared.checkNowResultHandler = { [weak self] status in
+        AppState.shared.checkNowResultHandler = { [weak self] snapshot in
             guard let self else { return }
-            self.popoverManager.showConnectionStatus(status)
+            self.currentStatus = snapshot.overallStatus
+            self.currentSiteStatuses = snapshot.siteStatuses
+            self.updateIcon(for: snapshot.overallStatus, siteStatuses: snapshot.siteStatuses)
+            self.popoverManager.showConnectionStatus(snapshot.overallStatus, siteStatuses: snapshot.siteStatuses)
         }
 
         AppState.shared.start()
@@ -203,7 +211,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             guard let self else { return }
             self.launchTooltipFinished = true
             if self.receivedFirstStatus {
-                self.popoverManager.showConnectionStatus(self.currentStatus)
+                self.popoverManager.showConnectionStatus(self.currentStatus, siteStatuses: self.currentSiteStatuses)
             }
         }
     }
@@ -271,7 +279,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popoverManager = PopoverManager { [weak self] in self?.statusItem.button }
-        updateIcon(for: .noNetwork)
+        updateIcon(for: .noNetwork, siteStatuses: currentSiteStatuses)
 
         let menu = NSMenu()
         menu.delegate = self
@@ -609,9 +617,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     // MARK: - Icon
 
     private func updateIcon(for status: AppState.ConnectionStatus) {
+        updateIcon(for: status, siteStatuses: currentSiteStatuses)
+    }
+
+    private func updateIcon(for status: AppState.ConnectionStatus, siteStatuses: [AppState.ConnectionStatus]) {
         guard let button = statusItem.button else { return }
 
         let pref = IconPreferences.slot(for: status)
+        let showsMultiSiteIcon = siteStatuses.count > 1
 
         let symbolName: String
         let color: NSColor
@@ -627,21 +640,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             }
         }
 
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        guard let baseImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config) else { return }
-
-        let tinted = baseImage.copy() as! NSImage
-        tinted.lockFocus()
-        color.set()
-        NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
-        tinted.unlockFocus()
-
         let useSSIDLabel = UserDefaults.standard.bool(forKey: "useSSIDAsMenuBarLabel")
         var rawLabel  = String(pref.menuLabel.prefix(15)).trimmingCharacters(in: .whitespaces)
-        var showLabel = pref.menuLabelEnabled && !rawLabel.isEmpty
+        var showLabel = pref.menuLabelEnabled && !rawLabel.isEmpty && !showsMultiSiteIcon
 
-        if useSSIDLabel && (status == .connected || status == .blocked) {
+        if useSSIDLabel && !showsMultiSiteIcon && (status == .connected || status == .blocked) {
             let ssid = SSIDManager.shared.currentSSID() ?? lastKnownSSID ?? ""
             if !ssid.isEmpty {
                 rawLabel  = String(ssid.prefix(15))
@@ -650,12 +653,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         }
 
         let barHeight = NSStatusBar.system.thickness
-        let iconSize  = tinted.size
+        let iconImage: NSImage
+        let iconSize: NSSize
+
+        if showsMultiSiteIcon {
+            iconImage = multiSiteStatusImage(for: siteStatuses, size: NSSize(width: barHeight, height: barHeight))
+            iconSize = iconImage.size
+        } else {
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            guard let baseImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) else { return }
+
+            let tinted = baseImage.copy() as! NSImage
+            tinted.lockFocus()
+            color.set()
+            NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
+            tinted.unlockFocus()
+            iconImage = tinted
+            iconSize = tinted.size
+        }
 
         if showLabel {
             let font = NSFont.menuBarFont(ofSize: 12)
             let attachment = NSTextAttachment()
-            attachment.image = tinted
+            attachment.image = iconImage
             attachment.bounds = NSRect(
                 x: 0, y: (font.capHeight - iconSize.height) / 2,
                 width: iconSize.width, height: iconSize.height
@@ -675,7 +696,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         let finalImage = NSImage(size: NSSize(width: barHeight, height: barHeight), flipped: false) { rect in
             let ox = (rect.width  - iconSize.width)  / 2
             let oy = (rect.height - iconSize.height) / 2
-            tinted.draw(in: NSRect(x: ox, y: oy, width: iconSize.width, height: iconSize.height))
+            iconImage.draw(in: NSRect(x: ox, y: oy, width: iconSize.width, height: iconSize.height))
             return true
         }
 
@@ -683,6 +704,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         button.image           = finalImage
         button.attributedTitle = NSAttributedString(string: "")
         button.imagePosition   = .imageOnly
+    }
+
+    private func multiSiteStatusImage(for statuses: [AppState.ConnectionStatus], size: NSSize) -> NSImage {
+        let visibleStatuses = Array(statuses.prefix(3))
+
+        let image = NSImage(size: size, flipped: false) { rect in
+            let count = max(visibleStatuses.count, 2)
+            let barWidth: CGFloat = count == 2 ? 4 : 3
+            let spacing: CGFloat = 2
+            let barHeight = min(rect.height - 5, 13)
+            let totalWidth = CGFloat(count) * barWidth + CGFloat(count - 1) * spacing
+            let originX = (rect.width - totalWidth) / 2
+            let originY = (rect.height - barHeight) / 2
+
+            for (index, status) in visibleStatuses.enumerated() {
+                let x = originX + CGFloat(index) * (barWidth + spacing)
+                let barRect = NSRect(x: x, y: originY, width: barWidth, height: barHeight)
+                let path = NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5)
+                self.resolvedColor(for: status).setFill()
+                path.fill()
+            }
+
+            return true
+        }
+
+        image.isTemplate = false
+        return image
+    }
+
+    private func resolvedColor(for status: AppState.ConnectionStatus) -> NSColor {
+        let pref = IconPreferences.slot(for: status)
+        if NSImage(systemSymbolName: pref.symbolName, accessibilityDescription: nil) != nil {
+            return pref.color
+        }
+
+        switch status {
+        case .connected:
+            return .systemGreen
+        case .blocked:
+            return .systemYellow
+        case .noNetwork:
+            return .systemRed
+        }
     }
 
     // MARK: - Settings
@@ -695,7 +759,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             return
         }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 529, height: 640),
             styleMask: [.titled, .closable], backing: .buffered, defer: false
         )
         window.center()

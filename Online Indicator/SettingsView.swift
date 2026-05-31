@@ -12,9 +12,10 @@ struct SettingsView: View {
     @State private var intervalText    = ""
     @State private var intervalSaved   = false
     @State private var intervalInvalid = false
-    @State private var pingURL         = ""
-    @State private var pingURLSaved    = false
-    @State private var pingURLInvalid  = false
+    @State private var pingURLs        = Array(repeating: "", count: ConnectivityChecker.maximumMonitoringURLCount)
+    @State private var pingURLAliases  = Array(repeating: "", count: ConnectivityChecker.maximumMonitoringURLCount)
+    @State private var pingURLsSaved   = false
+    @State private var invalidPingURLIndexes: Set<Int> = []
     @State private var isLaunchEnabled = false
 
     @State private var leftRightClickEnabled = true
@@ -149,7 +150,7 @@ struct SettingsView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
-        .frame(width: 460)
+        .frame(width: 529)
         .background(Color(.windowBackgroundColor))
         .sheet(isPresented: $showSymbolBrowser) {
             SymbolBrowserView(
@@ -167,7 +168,8 @@ struct SettingsView: View {
         .onAppear {
             isLaunchEnabled       = LoginItemManager.shared.isEnabled()
             intervalText          = formatInterval(interval)
-            pingURL               = UserDefaults.standard.string(forKey: "pingURL") ?? ""
+            pingURLs              = ConnectivityChecker.editableMonitoringURLStrings()
+            pingURLAliases        = ConnectivityChecker.editableMonitoringURLAliases()
             connectedSlot         = IconPreferences.slot(for: .connected)
             blockedSlot           = IconPreferences.slot(for: .blocked)
             noNetworkSlot         = IconPreferences.slot(for: .noNetwork)
@@ -190,6 +192,9 @@ struct SettingsView: View {
             connectedSlot         = IconPreferences.slot(for: .connected)
             blockedSlot           = IconPreferences.slot(for: .blocked)
             noNetworkSlot         = IconPreferences.slot(for: .noNetwork)
+            pingURLs              = ConnectivityChecker.editableMonitoringURLStrings()
+            pingURLAliases        = ConnectivityChecker.editableMonitoringURLAliases()
+            invalidPingURLIndexes = []
             leftRightClickEnabled = UserDefaults.standard.bool(forKey: "leftRightClickEnabled")
             leftClickAction       = UserDefaults.standard.string(forKey: "leftClickAction")  ?? "wifi"
             rightClickAction      = UserDefaults.standard.string(forKey: "rightClickAction") ?? "menu"
@@ -367,42 +372,73 @@ struct SettingsView: View {
                     Divider().padding(.leading, 56)
 
                     SettingsRow(icon: "target", iconColor: .green,
-                                title: "Ping URL",
-                                subtitle: "The address the app visits to test your connection") { EmptyView() }
+                                title: "Monitoring URLs",
+                                subtitle: "Up to three addresses checked on every cycle") { EmptyView() }
 
                     HStack(spacing: 0) {
                         Spacer().frame(width: 56)
                         VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                TextField(ConnectivityChecker.defaultURLString, text: $pingURL)
-                                    .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
-                                    .onChange(of: pingURL) { _, _ in pingURLInvalid = false }
-                                if pingURLSaved {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 16))
-                                        .transition(.scale.combined(with: .opacity))
-                                } else {
-                                    Button("Apply") { applyPingURL() }.buttonStyle(.bordered).controlSize(.small)
-                                        .transition(.opacity.combined(with: .scale))
+                            ForEach(0..<ConnectivityChecker.maximumMonitoringURLCount, id: \.self) { index in
+                                HStack(spacing: 8) {
+                                    TextField(monitoringURLPlaceholder(for: index), text: Binding(
+                                        get: { pingURLs[index] },
+                                        set: {
+                                            pingURLs[index] = $0
+                                            pingURLsSaved = false
+                                            invalidPingURLIndexes.remove(index)
+                                        }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(invalidPingURLIndexes.contains(index) ? Color.red : Color.clear, lineWidth: 1)
+                                    }
+
+                                    TextField("Alias", text: Binding(
+                                        get: { pingURLAliases[index] },
+                                        set: {
+                                            pingURLAliases[index] = $0
+                                            pingURLsSaved = false
+                                        }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 12))
+                                    .frame(width: 120)
+
+                                    if index == 0 {
+                                        if pingURLsSaved {
+                                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 16))
+                                                .transition(.scale.combined(with: .opacity))
+                                        } else {
+                                            Button("Apply") { applyPingURLs() }.buttonStyle(.bordered).controlSize(.small)
+                                                .transition(.opacity.combined(with: .scale))
+                                        }
+                                    } else {
+                                        Spacer().frame(width: 48)
+                                    }
                                 }
                             }
-                            .animation(.easeInOut(duration: 0.18), value: pingURLSaved)
-                            if pingURLInvalid {
+                            .animation(.easeInOut(duration: 0.18), value: pingURLsSaved)
+
+                            if !invalidPingURLIndexes.isEmpty {
                                 HStack(spacing: 4) {
                                     Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9))
-                                    Text("Enter a valid URL").font(.system(size: 10))
+                                    Text("Use valid http:// or https:// addresses").font(.system(size: 10))
                                 }
                                 .foregroundStyle(.red).transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
-                        .padding(.trailing, 18).animation(.easeInOut(duration: 0.18), value: pingURLInvalid)
+                        .padding(.trailing, 18).animation(.easeInOut(duration: 0.18), value: invalidPingURLIndexes)
                     }
                     .padding(.bottom, 4)
 
                     HStack(spacing: 0) {
                         Spacer().frame(width: 56)
-                        Button("Restore Default") { restoreDefaultPingURL() }
+                        Button("Restore Default") { restoreDefaultPingURLs() }
                             .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
-                            .disabled(pingURL.isEmpty).opacity(pingURL.isEmpty ? 0.4 : 1)
+                            .disabled(pingURLs.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                            .opacity(pingURLs.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ? 0.4 : 1)
                         Spacer()
                     }
                     .padding(.bottom, 12)
@@ -855,24 +891,37 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { intervalSaved = false } }
     }
 
-    private func applyPingURL() {
-        let t = pingURL.trimmingCharacters(in: .whitespaces)
-        if !t.isEmpty {
-            let ok = URL(string: t).flatMap { $0.scheme.map { ["http", "https"].contains($0) } } ?? false
-            if !ok { withAnimation { pingURLInvalid = true }; return }
-        }
-        pingURLInvalid = false
-        t.isEmpty ? UserDefaults.standard.removeObject(forKey: "pingURL")
-                  : UserDefaults.standard.set(t, forKey: "pingURL")
-        withAnimation { pingURLSaved = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { pingURLSaved = false } }
+    private func monitoringURLPlaceholder(for index: Int) -> String {
+        index == 0 ? ConnectivityChecker.defaultURLString : "Optional"
     }
 
-    private func restoreDefaultPingURL() {
-        UserDefaults.standard.removeObject(forKey: "pingURL")
-        withAnimation { pingURL = "" }
-        withAnimation { pingURLSaved = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { pingURLSaved = false } }
+    private func applyPingURLs() {
+        let invalidIndexes = ConnectivityChecker.invalidMonitoringURLIndexes(in: pingURLs)
+        guard invalidIndexes.isEmpty else {
+            withAnimation { invalidPingURLIndexes = invalidIndexes }
+            return
+        }
+
+        invalidPingURLIndexes = []
+        ConnectivityChecker.saveMonitoringTargets(urls: pingURLs, aliases: pingURLAliases)
+        pingURLs = ConnectivityChecker.editableMonitoringURLStrings()
+        pingURLAliases = ConnectivityChecker.editableMonitoringURLAliases()
+        AppState.shared.restart()
+
+        withAnimation { pingURLsSaved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { pingURLsSaved = false } }
+    }
+
+    private func restoreDefaultPingURLs() {
+        ConnectivityChecker.saveMonitoringTargets(urls: [], aliases: [])
+        invalidPingURLIndexes = []
+        withAnimation {
+            pingURLs = ConnectivityChecker.editableMonitoringURLStrings()
+            pingURLAliases = ConnectivityChecker.editableMonitoringURLAliases()
+        }
+        AppState.shared.restart()
+        withAnimation { pingURLsSaved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { pingURLsSaved = false } }
     }
 
     private func saveCurrentSet() {

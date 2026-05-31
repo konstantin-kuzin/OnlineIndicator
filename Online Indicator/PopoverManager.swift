@@ -1,6 +1,21 @@
 import SwiftUI
 import AppKit
 
+private struct CheckingSpinnerView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSProgressIndicator {
+        let indicator = NSProgressIndicator()
+        indicator.style = .spinning
+        indicator.controlSize = .small
+        indicator.isDisplayedWhenStopped = false
+        indicator.startAnimation(nil)
+        return indicator
+    }
+
+    func updateNSView(_ nsView: NSProgressIndicator, context: Context) {
+        nsView.startAnimation(nil)
+    }
+}
+
 // MARK: - PopoverManager
 //
 // Centralises all status-item popover creation, content, and dismissal.
@@ -66,15 +81,29 @@ final class PopoverManager {
         show(content: content, autoDismissAfter: delay)
     }
 
+    func showTextLines(_ lines: [String], autoDismissAfter delay: Double = 1.5) {
+        let content = VStack(alignment: .leading, spacing: 4) {
+            ForEach(lines, id: \.self) { line in
+                Text(line)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+
+        show(content: content, autoDismissAfter: delay)
+    }
+
     func showPersistentText(_ text: String) {
         showText(text, autoDismissAfter: 0)
     }
 
     func showChecking() {
         let content = HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.85)
+            CheckingSpinnerView()
+                .frame(width: 14, height: 14)
             Text("Checking…")
                 .font(.system(size: 13))
         }
@@ -83,13 +112,25 @@ final class PopoverManager {
         show(content: content, autoDismissAfter: 0)
     }
 
-    func showConnectionStatus(_ status: AppState.ConnectionStatus) {
-        let text: String = switch status {
-        case .connected: "Connected"
-        case .blocked:   "Connection Blocked"
-        case .noNetwork: "No Network"
+    func showConnectionStatus(_ status: AppState.ConnectionStatus,
+                              siteStatuses: [AppState.ConnectionStatus] = []) {
+        switch status {
+        case .connected:
+            showText("Connected")
+        case .blocked:
+            let labels = ConnectivityChecker.monitoringDisplayNames
+            let blockedLines = zip(labels, siteStatuses).compactMap { label, siteStatus in
+                siteStatus == .blocked ? "\(label) BLOCKED" : nil
+            }
+
+            if blockedLines.isEmpty {
+                showText("Connection Blocked")
+            } else {
+                showTextLines(blockedLines)
+            }
+        case .noNetwork:
+            showText("No Network")
         }
-        showText(text)
     }
 
     func showCopied(_ label: String) {
