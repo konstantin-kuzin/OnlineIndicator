@@ -10,13 +10,18 @@ A macOS menu bar app that replaces the Wi-Fi icon with customizable status indic
 <br>
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple&style=flat&color=%23FF5C60"></a>
-  <a href="https://github.com/bornexplorer/OnlineIndicator/releases" target="_blank"><img src="https://img.shields.io/github/v/release/bornexplorer/OnlineIndicator?style=flat&color=%23FAC800"></a>
-  <a href="https://github.com/bornexplorer/OnlineIndicator/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/github/license/bornexplorer/OnlineIndicator?style=flat&color=%2334C759"></a>
-  <a href="https://ko-fi.com/bornexplorer" target="_blank"><img src="https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white"></a>
+  <a href="https://github.com/konstantin-kuzin/OnlineIndicator/releases" target="_blank"><img src="https://img.shields.io/github/v/release/konstantin-kuzin/OnlineIndicator?style=flat&color=%23FAC800"></a>
+  <a href="https://github.com/konstantin-kuzin/OnlineIndicator/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/github/license/konstantin-kuzin/OnlineIndicator?style=flat&color=%2334C759"></a>
 </p>
 <br>
 
+## Update · v1.5
 
+- **Three monitoring domains** — configure up to three URLs to check on every cycle, so you can verify connectivity against multiple endpoints at once. For example, with split-tunnel VPN you can monitor general internet access, VPN reachability, and access to a corporate network segment — each with its own endpoint and status.
+- **New multi-bar indicator** — when more than one domain is active, the menu bar icon switches to a compact bar view with a separate colored segment for each domain, making per-site status visible at a glance.
+- **Domain aliases** — assign a short friendly name to each monitoring URL; aliases appear in status popovers and blocked-state messages instead of the raw address.
+
+<br>
 
 <img src=".github/assets/app-preview.png" alt="Online Indicator Preview" width="100%" />
 
